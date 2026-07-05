@@ -15,6 +15,7 @@ import (
 	"github.com/Allenize/notes-api/internal/auth"
 	"github.com/Allenize/notes-api/internal/middleware"
 	"github.com/Allenize/notes-api/internal/store"
+	"github.com/Allenize/notes-api/internal/web"
 )
 
 func loadOrGenerateSecret() []byte {
@@ -44,6 +45,7 @@ func main() {
 	h := api.New(s, secret)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", web.Handler())
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))

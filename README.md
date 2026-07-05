@@ -4,6 +4,7 @@ A notes/tasks REST API with real authentication — built in Go, using only the 
 
 ## Features
 
+- **A real web UI** — a single-page notes app served directly at `/`, same-origin (no CORS setup needed), styled to match your palette
 - **JWT authentication** — hand-implemented HMAC-SHA256 signed tokens (no external JWT library)
 - **Secure password hashing** — PBKDF2 with a random salt per user, implemented from stdlib crypto primitives (no external hashing library)
 - **Access + refresh tokens** — short-lived access tokens (15 min) and long-lived refresh tokens (7 days), with a `/auth/refresh` endpoint
@@ -21,6 +22,7 @@ Zero external dependencies — everything above is built from Go's standard libr
 
 | Method | Path             | Auth required | Description                          |
 |--------|------------------|:--------------:|----------------------------------------|
+| GET    | `/`              | no              | Web UI (signup/login + task manager)  |
 | GET    | `/health`        | no              | Health check                          |
 | POST   | `/auth/signup`   | no              | Create an account, returns tokens     |
 | POST   | `/auth/login`    | no              | Log in, returns tokens                |
