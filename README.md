@@ -1,44 +1,60 @@
-# notes-api
+# Notez
 
-A notes/tasks REST API with real authentication — built in Go, using only the standard library. Designed to run as a backend behind [Lime](https://github.com/Allenize/lime).
+A premium-feeling notes web app with real authentication — built in Go, using only the standard library. Designed to run as a backend behind [Lime](https://github.com/Allenize/lime).
 
 ## Features
 
-- **A real web UI** — a single-page notes app served directly at `/`, same-origin (no CORS setup needed), styled to match your palette
+- **A real web UI** — sidebar navigation, dashboard, note cards, and a Markdown editor, all served same-origin at `/` (no CORS setup needed), styled with a warm cream/yellow/orange/brown palette
+- **Dashboard** — quick stats, pinned/favorite/recent notes, and an activity timeline (all backed by real data, not placeholders)
+- **Categories & tags** — organize notes and filter by either from the sidebar, with live counts
+- **Favorites, pinning, archive, and trash** — with restore from trash, and a bulk "Empty Trash" action
+- **Markdown editor** — write/preview toggle, supporting headings, bold/italic, checklists, code blocks, blockquotes, and tables — hand-written renderer, no external Markdown library, with HTML-escaping to prevent script injection from note content
+- **Word count & reading time** — computed live as you type
 - **JWT authentication** — hand-implemented HMAC-SHA256 signed tokens (no external JWT library)
 - **Secure password hashing** — PBKDF2 with a random salt per user, implemented from stdlib crypto primitives (no external hashing library)
 - **Access + refresh tokens** — short-lived access tokens (15 min) and long-lived refresh tokens (7 days), with a `/auth/refresh` endpoint
-- **Per-user data isolation** — every task is scoped to its owner; users can't see or modify each other's data
+- **Per-user data isolation** — every note is scoped to its owner; users can't see or modify each other's data
 - **Persistent storage** — a JSON file-backed store that survives restarts (see the caveat below for hosted deployments)
-- **Pagination & filtering** — `limit`, `offset`, `done`, and `q` (search) query params on task listing
+- **Pagination & filtering** — `limit`, `offset`, `done`, `category`, `tag`, `favorite`, `pinned`, `view`, and `q` (search) query params
 - **Rate limiting** — a token-bucket limiter per client IP, implemented from scratch
 - **Structured request logging** — every request gets a unique ID, logged with method, path, status, and duration
 - **Graceful shutdown** — catches `SIGTERM`/`SIGINT` and finishes in-flight requests before exiting
-- **Real test coverage** — unit tests for password hashing, JWT issuing/verification, and the store (including a persistence-across-restart test)
+- **Real test coverage** — unit tests for password hashing, JWT issuing/verification, and the store (including favorites/pin/archive, trash/restore, and a persistence-across-restart test)
 
-Zero external dependencies — everything above is built from Go's standard library.
+Zero external dependencies — everything above, including the Markdown renderer, is built from Go's standard library and vanilla JavaScript.
+
+## Not in this pass
+
+The original design brief also called for calendar view, real-time sharing/collaboration, file attachments with drag-and-drop, and version history. Each of those needs real infrastructure this project doesn't have yet (e.g. attachments need cloud storage, since Render's free tier wipes local files on redeploy) — they're natural next steps, not implemented here.
 
 ## Endpoints
 
-| Method | Path             | Auth required | Description                          |
-|--------|------------------|:--------------:|----------------------------------------|
-| GET    | `/`              | no              | Web UI (signup/login + task manager)  |
-| GET    | `/health`        | no              | Health check                          |
-| POST   | `/auth/signup`   | no              | Create an account, returns tokens     |
-| POST   | `/auth/login`    | no              | Log in, returns tokens                |
-| POST   | `/auth/refresh`  | no              | Exchange a refresh token for a new pair |
-| GET    | `/tasks`         | yes             | List your tasks (supports pagination/filtering) |
-| POST   | `/tasks`         | yes             | Create a task                         |
-| GET    | `/tasks/{id}`    | yes             | Get a single task                     |
-| PUT    | `/tasks/{id}`    | yes             | Update a task                         |
-| DELETE | `/tasks/{id}`    | yes             | Delete a task                         |
+| Method | Path                | Auth required | Description                          |
+|--------|---------------------|:--------------:|----------------------------------------|
+| GET    | `/`                 | no              | Web UI (signup/login + notes dashboard) |
+| GET    | `/health`           | no              | Health check                          |
+| POST   | `/auth/signup`      | no              | Create an account, returns tokens     |
+| POST   | `/auth/login`       | no              | Log in, returns tokens                |
+| POST   | `/auth/refresh`     | no              | Exchange a refresh token for a new pair |
+| GET    | `/tasks`            | yes             | List your notes (supports pagination/filtering) |
+| POST   | `/tasks`            | yes             | Create a note                         |
+| GET    | `/tasks/stats`      | yes             | Summary counts (total/favorites/pinned/archived/trashed/categories) |
+| GET    | `/tasks/{id}`       | yes             | Get a single note                     |
+| PUT    | `/tasks/{id}`       | yes             | Update a note (title/notes/category/tags/favorite/pinned/archived) |
+| DELETE | `/tasks/{id}`       | yes             | Permanently delete a note             |
+| POST   | `/tasks/{id}/trash` | yes             | Soft-delete a note (move to trash)    |
+| POST   | `/tasks/{id}/restore` | yes           | Restore a note from trash             |
 
 Authenticated requests need `Authorization: Bearer <access_token>`.
 
 ### Task list query params
 
+- `view=all` (default) / `archived` / `trash` — which bucket to list
 - `done=true` / `done=false` — filter by completion status
-- `q=search+term` — search title and notes
+- `favorite=true` / `pinned=true` — filter by favorite/pinned status
+- `category=Name` — filter by category (case-insensitive)
+- `tag=name` — filter by tag (case-insensitive)
+- `q=search+term` — search title and note body
 - `limit=20` — page size (default 20, max 100)
 - `offset=0` — page offset
 

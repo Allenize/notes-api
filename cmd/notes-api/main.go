@@ -57,9 +57,12 @@ func main() {
 	protected := http.NewServeMux()
 	protected.HandleFunc("GET /tasks", h.ListTasks)
 	protected.HandleFunc("POST /tasks", h.CreateTask)
+	protected.HandleFunc("GET /tasks/stats", h.Stats)
 	protected.HandleFunc("GET /tasks/{id}", h.GetTask)
 	protected.HandleFunc("PUT /tasks/{id}", h.UpdateTask)
 	protected.HandleFunc("DELETE /tasks/{id}", h.DeleteTask)
+	protected.HandleFunc("POST /tasks/{id}/trash", h.TrashTask)
+	protected.HandleFunc("POST /tasks/{id}/restore", h.RestoreTask)
 
 	mux.Handle("/tasks", auth.RequireAuth(secret)(protected))
 	mux.Handle("/tasks/", auth.RequireAuth(secret)(protected))

@@ -16,6 +16,9 @@ func newTestStore(t *testing.T) *Store {
 	return s
 }
 
+func strPtr(s string) *string { return &s }
+func boolPtr(b bool) *bool    { return &b }
+
 func TestCreateAndGetUser(t *testing.T) {
 	s := newTestStore(t)
 
@@ -48,9 +51,12 @@ func TestTaskCRUD(t *testing.T) {
 	s := newTestStore(t)
 	u, _ := s.CreateUser("carol", "hash")
 
-	task, err := s.CreateTask(u.ID, "Buy milk", "2%")
+	task, err := s.CreateTask(u.ID, "Buy milk", "2%", "Errands", []string{"grocery"})
 	if err != nil {
 		t.Fatalf("CreateTask returned error: %v", err)
+	}
+	if task.Category != "Errands" {
+		t.Fatalf("expected category Errands, got %q", task.Category)
 	}
 
 	tasks := s.ListTasks(u.ID)
@@ -59,7 +65,7 @@ func TestTaskCRUD(t *testing.T) {
 	}
 
 	newTitle := "Buy oat milk"
-	updated, err := s.UpdateTask(u.ID, task.ID, &newTitle, nil, nil)
+	updated, err := s.UpdateTask(u.ID, task.ID, TaskUpdate{Title: strPtr(newTitle)})
 	if err != nil {
 		t.Fatalf("UpdateTask returned error: %v", err)
 	}
@@ -81,7 +87,7 @@ func TestTaskIsolatedByUser(t *testing.T) {
 	u1, _ := s.CreateUser("dave", "hash")
 	u2, _ := s.CreateUser("erin", "hash")
 
-	task, _ := s.CreateTask(u1.ID, "Dave's task", "")
+	task, _ := s.CreateTask(u1.ID, "Dave's task", "", "", nil)
 
 	if _, err := s.GetTask(u2.ID, task.ID); err != ErrNotFound {
 		t.Fatalf("expected ErrNotFound when a different user accesses the task, got %v", err)
@@ -94,7 +100,7 @@ func TestStorePersistsAcrossReload(t *testing.T) {
 
 	s1, _ := New(path)
 	u, _ := s1.CreateUser("frank", "hash")
-	s1.CreateTask(u.ID, "Persisted task", "")
+	s1.CreateTask(u.ID, "Persisted task", "", "", nil)
 
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("expected data file to exist: %v", err)
@@ -113,5 +119,49 @@ func TestStorePersistsAcrossReload(t *testing.T) {
 	tasks := s2.ListTasks(got.ID)
 	if len(tasks) != 1 {
 		t.Fatalf("expected 1 persisted task, got %d", len(tasks))
+	}
+}
+
+func TestTaskFavoritePinArchive(t *testing.T) {
+	s := newTestStore(t)
+	u, _ := s.CreateUser("gina", "hash")
+	task, _ := s.CreateTask(u.ID, "Idea", "", "", nil)
+
+	updated, err := s.UpdateTask(u.ID, task.ID, TaskUpdate{Favorite: boolPtr(true), Pinned: boolPtr(true)})
+	if err != nil {
+		t.Fatalf("UpdateTask returned error: %v", err)
+	}
+	if !updated.Favorite || !updated.Pinned {
+		t.Fatalf("expected favorite and pinned to be true, got favorite=%v pinned=%v", updated.Favorite, updated.Pinned)
+	}
+
+	archived, err := s.UpdateTask(u.ID, task.ID, TaskUpdate{Archived: boolPtr(true)})
+	if err != nil {
+		t.Fatalf("UpdateTask (archive) returned error: %v", err)
+	}
+	if !archived.Archived {
+		t.Fatal("expected archived to be true")
+	}
+}
+
+func TestTaskTrashAndRestore(t *testing.T) {
+	s := newTestStore(t)
+	u, _ := s.CreateUser("hank", "hash")
+	task, _ := s.CreateTask(u.ID, "Old note", "", "", nil)
+
+	trashed, err := s.TrashTask(u.ID, task.ID)
+	if err != nil {
+		t.Fatalf("TrashTask returned error: %v", err)
+	}
+	if !trashed.Trashed || trashed.TrashedAt == nil {
+		t.Fatal("expected task to be marked trashed with a timestamp")
+	}
+
+	restored, err := s.RestoreTask(u.ID, task.ID)
+	if err != nil {
+		t.Fatalf("RestoreTask returned error: %v", err)
+	}
+	if restored.Trashed || restored.TrashedAt != nil {
+		t.Fatal("expected task to be restored (not trashed)")
 	}
 }

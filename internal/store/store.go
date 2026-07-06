@@ -21,13 +21,20 @@ type User struct {
 }
 
 type Task struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	Title     string    `json:"title"`
-	Notes     string    `json:"notes"`
-	Done      bool      `json:"done"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        string     `json:"id"`
+	UserID    string     `json:"user_id"`
+	Title     string     `json:"title"`
+	Notes     string     `json:"notes"`
+	Done      bool       `json:"done"`
+	Category  string     `json:"category"`
+	Tags      []string   `json:"tags"`
+	Favorite  bool       `json:"favorite"`
+	Pinned    bool       `json:"pinned"`
+	Archived  bool       `json:"archived"`
+	Trashed   bool       `json:"trashed"`
+	TrashedAt *time.Time `json:"trashed_at,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 type snapshot struct {
@@ -130,9 +137,13 @@ func (s *Store) GetUserByUsername(username string) (*User, error) {
 	return s.users[id], nil
 }
 
-func (s *Store) CreateTask(userID, title, notes string) (*Task, error) {
+func (s *Store) CreateTask(userID, title, notes, category string, tags []string) (*Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if tags == nil {
+		tags = []string{}
+	}
 
 	now := time.Now()
 	t := &Task{
@@ -140,6 +151,8 @@ func (s *Store) CreateTask(userID, title, notes string) (*Task, error) {
 		UserID:    userID,
 		Title:     title,
 		Notes:     notes,
+		Category:  category,
+		Tags:      tags,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -175,7 +188,18 @@ func (s *Store) GetTask(userID, taskID string) (*Task, error) {
 	return t, nil
 }
 
-func (s *Store) UpdateTask(userID, taskID string, title, notes *string, done *bool) (*Task, error) {
+type TaskUpdate struct {
+	Title    *string
+	Notes    *string
+	Done     *bool
+	Category *string
+	Tags     *[]string
+	Favorite *bool
+	Pinned   *bool
+	Archived *bool
+}
+
+func (s *Store) UpdateTask(userID, taskID string, u TaskUpdate) (*Task, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -184,15 +208,69 @@ func (s *Store) UpdateTask(userID, taskID string, title, notes *string, done *bo
 		return nil, ErrNotFound
 	}
 
-	if title != nil {
-		t.Title = *title
+	if u.Title != nil {
+		t.Title = *u.Title
 	}
-	if notes != nil {
-		t.Notes = *notes
+	if u.Notes != nil {
+		t.Notes = *u.Notes
 	}
-	if done != nil {
-		t.Done = *done
+	if u.Done != nil {
+		t.Done = *u.Done
 	}
+	if u.Category != nil {
+		t.Category = *u.Category
+	}
+	if u.Tags != nil {
+		t.Tags = *u.Tags
+	}
+	if u.Favorite != nil {
+		t.Favorite = *u.Favorite
+	}
+	if u.Pinned != nil {
+		t.Pinned = *u.Pinned
+	}
+	if u.Archived != nil {
+		t.Archived = *u.Archived
+	}
+	t.UpdatedAt = time.Now()
+
+	if err := s.saveLocked(); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func (s *Store) TrashTask(userID, taskID string) (*Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	t, ok := s.tasks[taskID]
+	if !ok || t.UserID != userID {
+		return nil, ErrNotFound
+	}
+
+	now := time.Now()
+	t.Trashed = true
+	t.TrashedAt = &now
+	t.UpdatedAt = now
+
+	if err := s.saveLocked(); err != nil {
+		return nil, err
+	}
+	return t, nil
+}
+
+func (s *Store) RestoreTask(userID, taskID string) (*Task, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	t, ok := s.tasks[taskID]
+	if !ok || t.UserID != userID {
+		return nil, ErrNotFound
+	}
+
+	t.Trashed = false
+	t.TrashedAt = nil
 	t.UpdatedAt = time.Now()
 
 	if err := s.saveLocked(); err != nil {

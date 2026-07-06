@@ -155,8 +155,10 @@ func (h *Handlers) Refresh(w http.ResponseWriter, r *http.Request) {
 }
 
 type taskRequest struct {
-	Title string `json:"title"`
-	Notes string `json:"notes"`
+	Title    string   `json:"title"`
+	Notes    string   `json:"notes"`
+	Category string   `json:"category"`
+	Tags     []string `json:"tags"`
 }
 
 func (h *Handlers) CreateTask(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +174,7 @@ func (h *Handlers) CreateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.store.CreateTask(userID, req.Title, req.Notes)
+	task, err := h.store.CreateTask(userID, req.Title, req.Notes, req.Category, req.Tags)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not create task")
 		return
@@ -193,12 +195,77 @@ func (h *Handlers) ListTasks(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 
+	view := q.Get("view")
+	filtered := tasks[:0:0]
+	for _, t := range tasks {
+		switch view {
+		case "trash":
+			if t.Trashed {
+				filtered = append(filtered, t)
+			}
+		case "archived":
+			if t.Archived && !t.Trashed {
+				filtered = append(filtered, t)
+			}
+		default:
+			if !t.Trashed && !t.Archived {
+				filtered = append(filtered, t)
+			}
+		}
+	}
+	tasks = filtered
+
 	if doneStr := q.Get("done"); doneStr != "" {
 		want := doneStr == "true"
 		filtered := tasks[:0:0]
 		for _, t := range tasks {
 			if t.Done == want {
 				filtered = append(filtered, t)
+			}
+		}
+		tasks = filtered
+	}
+
+	if favStr := q.Get("favorite"); favStr != "" {
+		want := favStr == "true"
+		filtered := tasks[:0:0]
+		for _, t := range tasks {
+			if t.Favorite == want {
+				filtered = append(filtered, t)
+			}
+		}
+		tasks = filtered
+	}
+
+	if pinStr := q.Get("pinned"); pinStr != "" {
+		want := pinStr == "true"
+		filtered := tasks[:0:0]
+		for _, t := range tasks {
+			if t.Pinned == want {
+				filtered = append(filtered, t)
+			}
+		}
+		tasks = filtered
+	}
+
+	if category := strings.TrimSpace(q.Get("category")); category != "" {
+		filtered := tasks[:0:0]
+		for _, t := range tasks {
+			if strings.EqualFold(t.Category, category) {
+				filtered = append(filtered, t)
+			}
+		}
+		tasks = filtered
+	}
+
+	if tag := strings.TrimSpace(q.Get("tag")); tag != "" {
+		filtered := tasks[:0:0]
+		for _, t := range tasks {
+			for _, tg := range t.Tags {
+				if strings.EqualFold(tg, tag) {
+					filtered = append(filtered, t)
+					break
+				}
 			}
 		}
 		tasks = filtered
@@ -216,6 +283,9 @@ func (h *Handlers) ListTasks(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sort.Slice(tasks, func(i, j int) bool {
+		if tasks[i].Pinned != tasks[j].Pinned {
+			return tasks[i].Pinned
+		}
 		return tasks[i].CreatedAt.After(tasks[j].CreatedAt)
 	})
 
@@ -247,6 +317,48 @@ func (h *Handlers) ListTasks(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type statsResponse struct {
+	Total      int      `json:"total"`
+	Favorites  int      `json:"favorites"`
+	Pinned     int      `json:"pinned"`
+	Archived   int      `json:"archived"`
+	Trashed    int      `json:"trashed"`
+	Categories []string `json:"categories"`
+}
+
+func (h *Handlers) Stats(w http.ResponseWriter, r *http.Request) {
+	userID, _ := auth.UserIDFromContext(r.Context())
+	tasks := h.store.ListTasks(userID)
+
+	stats := statsResponse{Categories: []string{}}
+	seenCategories := map[string]bool{}
+
+	for _, t := range tasks {
+		if t.Trashed {
+			stats.Trashed++
+			continue
+		}
+		if t.Archived {
+			stats.Archived++
+			continue
+		}
+		stats.Total++
+		if t.Favorite {
+			stats.Favorites++
+		}
+		if t.Pinned {
+			stats.Pinned++
+		}
+		if t.Category != "" && !seenCategories[t.Category] {
+			seenCategories[t.Category] = true
+			stats.Categories = append(stats.Categories, t.Category)
+		}
+	}
+
+	sort.Strings(stats.Categories)
+	writeJSON(w, http.StatusOK, stats)
+}
+
 func (h *Handlers) GetTask(w http.ResponseWriter, r *http.Request) {
 	userID, _ := auth.UserIDFromContext(r.Context())
 	taskID := r.PathValue("id")
@@ -264,9 +376,14 @@ func (h *Handlers) GetTask(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateTaskRequest struct {
-	Title *string `json:"title"`
-	Notes *string `json:"notes"`
-	Done  *bool   `json:"done"`
+	Title    *string   `json:"title"`
+	Notes    *string   `json:"notes"`
+	Done     *bool     `json:"done"`
+	Category *string   `json:"category"`
+	Tags     *[]string `json:"tags"`
+	Favorite *bool     `json:"favorite"`
+	Pinned   *bool     `json:"pinned"`
+	Archived *bool     `json:"archived"`
 }
 
 func (h *Handlers) UpdateTask(w http.ResponseWriter, r *http.Request) {
@@ -279,13 +396,54 @@ func (h *Handlers) UpdateTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.store.UpdateTask(userID, taskID, req.Title, req.Notes, req.Done)
+	task, err := h.store.UpdateTask(userID, taskID, store.TaskUpdate{
+		Title:    req.Title,
+		Notes:    req.Notes,
+		Done:     req.Done,
+		Category: req.Category,
+		Tags:     req.Tags,
+		Favorite: req.Favorite,
+		Pinned:   req.Pinned,
+		Archived: req.Archived,
+	})
 	if err == store.ErrNotFound {
 		writeErr(w, http.StatusNotFound, "task not found")
 		return
 	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not update task")
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (h *Handlers) TrashTask(w http.ResponseWriter, r *http.Request) {
+	userID, _ := auth.UserIDFromContext(r.Context())
+	taskID := r.PathValue("id")
+
+	task, err := h.store.TrashTask(userID, taskID)
+	if err == store.ErrNotFound {
+		writeErr(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not trash task")
+		return
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (h *Handlers) RestoreTask(w http.ResponseWriter, r *http.Request) {
+	userID, _ := auth.UserIDFromContext(r.Context())
+	taskID := r.PathValue("id")
+
+	task, err := h.store.RestoreTask(userID, taskID)
+	if err == store.ErrNotFound {
+		writeErr(w, http.StatusNotFound, "task not found")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not restore task")
 		return
 	}
 	writeJSON(w, http.StatusOK, task)
